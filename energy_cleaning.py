@@ -27,7 +27,10 @@ coaldf = coaldf.assign(RegState = regstates).set_index("RegState").iloc[:, 7:].l
 coaldf[coaldf=="--"] = np.nan
 coaldf[coaldf=="NM"] = np.nan
 coal_clean = coaldf.dropna().astype(float).T
-
+start_date = pd.to_datetime('2001-01-01')
+end_date = pd.to_datetime('2022-12-31')
+quarters = pd.date_range(start=start_date, end=end_date, freq='Q')[:-1]
+coal_clean.index = quarters
 
 
 # In[ ]:
@@ -65,7 +68,7 @@ q_gasp = weekly_gasp.resample("Q").mean().iloc[:-1,:]
 yrs = pd.Series(np.repeat(np.arange(2003,2023,1), 4)[1:]).astype(str)
 qs = pd.Series(np.tile(np.arange(1,5), 2023-2003)[1:]).astype(str)
 qindex = "Q" + qs + " " + yrs
-q_gasp.index = qindex
+# q_gasp.index = qindex
 
 
 
@@ -131,7 +134,7 @@ for label in keptlabels:
     this_df = gen_clean[gen_clean.Type==label].iloc[:, :-1].T
     this_df.index = pd.to_datetime(this_df.index)
     this_df = round(this_df.resample("Q").mean(), 2)
-    this_df.index = gen_index
+    # this_df.index = gen_index
     gen_dfdict[label] = this_df
 
 # print(gen_dfdict.keys())
@@ -145,6 +148,7 @@ for label in keptlabels:
 
 
 # In[ ]:
+
 
 #export
 coal_clean.to_csv("clean_data/clean_coal.csv")
