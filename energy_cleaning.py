@@ -7,76 +7,10 @@
 import numpy as np
 import pandas as pd
 
-
-# <h3>Coal Consumption by State; Electric Power Used in Short Tons; Quarterly 2001-2022</h3>
-
-# In[70]:
-
-
-coal = pd.read_csv("raw_data/coal_consumption.csv")
-
-
-# In[81]:
-
-
-coaldf = coal.loc[6:, ]
-coaldf.columns = coal.loc[3,:].values
-regstates = coaldf.description.str.extract("Electric power : (.*)")
+producers = {"Texas", "North Dakota", "Wyoming", "Pennsylvania", "Oklahoma", "West Virginia"}
+consumers = {"Texas", "California", "New York", "Florida", "Ohio", "Pennsylvania"}
+relevstates = list(producers.union(consumers))
 usstates = ["Alabama", "Alaska", "Arizona", "Arkansas", "California", "Colorado", "Connecticut", "Delaware", "Florida", "Georgia", "Hawaii", "Idaho", "Illinois", "Indiana", "Iowa", "Kansas", "Kentucky", "Louisiana", "Maine", "Maryland", "Massachusetts", "Michigan", "Minnesota", "Mississippi", "Missouri", "Montana", "Nebraska", "Nevada", "New Hampshire", "New Jersey", "New Mexico", "New York", "North Carolina", "North Dakota", "Ohio", "Oklahoma", "Oregon", "Pennsylvania", "Rhode Island", "South Carolina", "South Dakota", "Tennessee", "Texas", "Utah", "Vermont", "Virginia", "Washington", "West Virginia", "Wisconsin", "Wyoming"]
-coaldf = coaldf.assign(RegState = regstates).set_index("RegState").iloc[:, 7:].loc[usstates,:]
-coaldf[coaldf=="--"] = np.nan
-coaldf[coaldf=="NM"] = np.nan
-coal_clean = coaldf.dropna().astype(float).T
-start_date = pd.to_datetime('2001-01-01')
-end_date = pd.to_datetime('2022-12-31')
-quarters = pd.date_range(start=start_date, end=end_date, freq='Q')[:-1]
-coal_clean.index = quarters
-
-
-# In[ ]:
-
-
-
-
-
-# <h3>Gas Prices by Select States; Quarterly 2003-2022</h3>
-
-# In[121]:
-
-
-gas_price = pd.read_csv("raw_data/gas_price.csv")
-
-
-
-# In[193]:
-
-
-gasp_df = gas_price.loc[2:,]
-gasp_df.columns = gas_price.loc[1,:]
-gasp_df = gasp_df.set_index("Date").iloc[:, :-1]
-stateext = gasp_df.columns.str.extract("Weekly (.*) Regular .*").T.values
-gasp_df.columns = stateext[0]
-gasp_cols = stateext[np.isin(stateext, usstates)]
-weekly_gasp = gasp_df.loc[:, gasp_cols].dropna().astype(float)
-weekly_gasp.index = pd.to_datetime(weekly_gasp.index)
-q_gasp = weekly_gasp.resample("Q").mean().iloc[:-1,:]
-
-
-# In[195]:
-
-
-yrs = pd.Series(np.repeat(np.arange(2003,2023,1), 4)[1:]).astype(str)
-qs = pd.Series(np.tile(np.arange(1,5), 2023-2003)[1:]).astype(str)
-qindex = "Q" + qs + " " + yrs
-# q_gasp.index = qindex
-
-
-
-# In[ ]:
-
-
-
-
 
 # <h3>Net Energy Generation by Select States in Thousand MWh; Quarterly 2001-2022</h3>
 
@@ -132,8 +66,8 @@ gen_index = "Q" + gen_qs + " " + gen_yrs
 gen_dfdict = {}
 for label in keptlabels:
     this_df = gen_clean[gen_clean.Type==label].iloc[:, :-1].T
-    this_df.index = pd.to_datetime(this_df.index)
-    this_df = round(this_df.resample("Q").mean(), 2)
+    this_df.index = pd.to_datetime(this_df.index, format="%b %Y")
+    # this_df = round(this_df.resample("Q").mean(), 2) #quarterly resampling
     # this_df.index = gen_index
     gen_dfdict[label] = this_df
 
@@ -146,16 +80,38 @@ for label in keptlabels:
 #get the data by any key specified above
 # gen_dfdict["Biomass"]
 
+pop2000s = pd.read_csv("raw_data/pop2000s.csv", index_col=0)
+pop2010s = pd.read_csv("raw_data/pop2010s.csv", index_col=0)
+pop2020s = pd.read_csv("raw_data/pop2020s.csv", index_col=0)
+
+pop2000s.set_index("NAME", inplace=True)
+pop2010s.set_index("NAME", inplace=True)
+pop2020s.set_index("NAME", inplace=True)
+
+pop2K = pop2000s.loc[relevstates, "POPESTIMATE2000":"POPESTIMATE2009"]
+pop210K = pop2010s.loc[relevstates, "POPESTIMATE2010":"POPESTIMATE2019"]
+pop220K = pop2020s.loc[relevstates, "POPESTIMATE2020":"POPESTIMATE2021"]
+
+allpops = pd.concat([pop2K, pop210K, pop220K], axis=1)
+popyear = np.arange(2000, 2022, 1)
+pop_w_years = allpops.rename(columns=dict(zip(allpops.columns, popyear)))  
+popT = pop_w_years.T
+popT.index = pd.to_datetime(popT.index, format="%Y")
+popT_by_month = pd.DataFrame(np.repeat(popT.values, 12, axis=0), index=pd.date_range("2000-01-01", "2021-12-01", freq="MS"), columns=popT.columns)
+
+
 
 # In[ ]:
 
 
 #export
-coal_clean.to_csv("clean_data/clean_coal.csv")
-q_gasp.to_csv("clean_data/clean_gasprice.csv")
+# coal_clean.to_csv("clean_data/clean_coal.csv") #deprecated
+# q_gasp.to_csv("clean_data/clean_gasprice.csv") #deprecated
+popT_by_month.to_csv("clean_data/clean_population.csv")
 for key in gen_dfdict.keys():
-    df = gen_dfdict[key]
-    filename = "clean_data/clean_" + str(key) + "_gen.csv"
+    df_states = np.isin(gen_dfdict[key].columns, relevstates)
+    df = gen_dfdict[key].iloc[:, df_states]
+    filename = "clean_data/clean_" + str(key).lower() + "_gen.csv"
     df.to_csv(filename)
 
 
