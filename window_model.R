@@ -1,0 +1,170 @@
+library(ggplot2)
+library(runner)
+
+# import generation datasets (X)
+indus <- c("biomass", "coal", "hydroelectric", "naturalgas", "nuclear", "solar", "wind", "wood")
+
+genlist <- list()
+for (i in 1:length(indus)){
+  filepath <- paste("clean_data/clean_", indus[i], "_gen.csv", sep="")
+  this_df <- data.frame(read.csv(filepath))
+  genlist[[i]] <- this_df
+}
+
+# import population dataset (normalizer)
+pop <- read.csv("clean_data/clean_population.csv")
+relevstates <- names(pop)[2:length(names(pop))]
+
+# import response variables
+climatecols <- c("DSCI", "pH", "temp", "turbidity")
+climatedata <- list()
+for (i in 1:length(climatecols)){
+  filepath <- paste("clean_data/resp/clean_", climatecols[i], ".csv", sep="")
+  this_df <- data.frame(read.csv(filepath))
+  climatedata[[i]] <- this_df
+}
+rev <- read.csv("clean_data/resp/clean_revenue.csv")
+head(rev)
+
+########
+
+time <- seq(as.Date("2001-01-01"), as.Date("2022-12-01"), by="month")
+shift <- function(x, n){
+  c(x[-(seq(n))], rep(NA, n))
+}
+shifted.time <- na.omit(shift(time, 1))
+
+#building climate index
+equal.weighting <- replicate(length(climatecols), 1/length(climatecols)) # user-defined
+
+minmax.scaler <- function(x){(x-min(x))/(max(x)-min(x))}
+
+plot.vs.time <- function(vals, ytitle="Value", maintitle="Time Series"){
+  df <- data.frame(Time = time, yvar = vals)
+  p <- ggplot(df, aes(x=Time, y=yvar)) + ylab(ytitle) + ggtitle(maintitle) + geom_line()
+  return (p)
+}
+
+get.state.climateindex <- function(state, weighting){
+  index <- replicate(nrow(data.frame(climatedata[1])), 0) # 0-initialize
+  for (i in 1:length(climatecols)){
+    values <- c(data.frame(climatedata[i])[,state])    
+    values <- minmax.scaler(values)*100 #scale each climate variable
+    index <- index + values*weighting[i]
+  }
+  return (minmax.scaler(index)*100) #scale the whole index
+}
+
+get.response <- function(state, climindex, param){
+  sales <- minmax.scaler(rev[,state]/pop[,state])*100 
+  #scaled revenue per capita from energy sales
+  resp <- param*sales + (1-param)*climindex #scale the convex combo
+  return (resp)
+}
+
+get.stateXY <- function(state, resp){
+  X <- data.frame((matrix(nrow=length(time))))
+  for (i in 1:length(indus)){
+    col.name <- indus[i]
+    cols.available <- c(names(genlist[[i]]))
+    if (state %in% cols.available){
+      # per capita generation by sector, then scaled up
+      X[[col.name]] <- (data.frame(genlist[[i]])[,state]/pop[,state])*(10e4)
+    }
+  }
+  out <- X[,2:length(names(X))]
+  out[["RESP"]] <- resp
+  out$RESP <- shift(out$RESP, 1) #shift to predict next month on this month
+  
+  return (na.omit(out)) # 263 observations
+}
+
+moving.avg <- function(x,kay){
+  return (runner(x, k=kay, f=mean))
+}
+
+window.regression <- function(state){
+  state.climindex <- get.state.climateindex(state, equal.weighting)
+  
+  #Cross Validation to choose care parameter
+  careparams <- seq(0,1,0.1) #the "care" parameter, 0 - 1 (climate impact - energy sales)
+  cv.param.mse <- c()
+  for (i in 1:length(careparams)){
+    this.careparam = careparams[i]
+    cv.state.resp <- get.response(state, state.climindex, this.careparam)
+    
+    # X vs. Y
+    cv.stateXY <- get.stateXY(state, cv.state.resp)
+    cv.stateXY.windows <- data.frame(apply(cv.stateXY, MARGIN=2, FUN=moving.avg, kay=3))
+    
+    #train test split
+    split <- trunc(0.75*nrow(cv.stateXY.windows))
+    cv.state.train <- cv.stateXY.windows[1:split,]
+    init.index <- 0.5*nrow(cv.stateXY.windows)
+    validroll <- 3
+    traintill <- split-validroll
+    current.index <- init.index
+    cv.mse.list <- c()
+    while (current.index < traintill){
+      cv.train <- cv.state.train[1:current.index,] 
+      cv.valid <- cv.state.train[current.index:current.index+validroll,]
+      cv.state.lm <- lm(RESP~., data=cv.train)
+      cv.pred <- predict.lm(cv.state.lm, newdata=cv.valid)
+      cv.act <- cv.valid$RESP
+      cv.state.mse <- mean((cv.act-cv.pred)^2)
+      cv.mse.list <- c(cv.mse.list, cv.state.mse)
+      current.index <- current.index + validroll
+    }
+    cv.param.mse <- c(cv.param.mse, mean(cv.mse.list))
+  }
+  
+  best.careparam = careparams[which.min(cv.param.mse)]
+  best.state.resp <- get.response(state, state.climindex, best.careparam)
+  
+  # X vs. Y
+  stateXY <- get.stateXY(state, best.state.resp)
+  stateXY.windows <- data.frame(apply(stateXY, MARGIN=2, FUN=moving.avg, kay=3))
+  
+  #train test split
+  split <- trunc(0.75*nrow(stateXY.windows))
+  state.trainwindows <- data.frame(stateXY.windows[1:split,])
+  state.testwindows <- data.frame(stateXY.windows[(split+1):nrow(stateXY.windows),])
+  
+  ## ROLLING WINDOW REGRESSION ##
+  
+  state.lmwindows <- lm(RESP~., data=state.trainwindows)
+  
+  coeffs <- summary(state.lmwindows)$coefficients
+  adj.r.sq <- summary(state.lmwindows)$adj.r.squared
+  feature.pvals <- sort(coeffs[2:nrow(coeffs), 4])
+  top3.pvals <- feature.pvals[1:3]
+  
+  predwindows <- predict.lm(state.lmwindows, newdata=state.testwindows)
+  actwindows <- state.testwindows$RESP
+  state.maewindows <- mean(abs(actwindows-predwindows))
+  state.msewindows <- mean((actwindows-predwindows)^2)
+  
+  ## TODO: Fix plotting
+  plot(seq(length(predwindows)), predwindows, type='b', col="blue")
+  lines(seq(length(actwindows)), actwindows, type='b', col="red")
+  
+  top3.pvals.names <- paste(list(names(top3.pvals)))
+  regression.res <- c(state.maewindows, state.msewindows, best.careparam, adj.r.sq, top3.pvals.names)
+  
+  return (regression.res)
+}
+
+index <- c("MAE", "MSE", "best.careparam", "adj.r.sq", "t3.pvals")
+window.analysis <- data.frame(index)
+
+for (i in 1:length(relevstates)){
+  this.relevstate <- relevstates[i]
+  res <- window.regression(this.relevstate)
+  window.analysis[[this.relevstate]] = res
+}
+window.analysis
+
+
+
+
+
