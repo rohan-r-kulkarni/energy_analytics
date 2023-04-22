@@ -2,7 +2,7 @@
 # coding: utf-8
 
 # In[2]:
-
+#! This file uses relative filepaths. Relative filepath may need to change based on user's file structure.
 
 import numpy as np
 import pandas as pd
@@ -15,7 +15,6 @@ usstates = ["Alabama", "Alaska", "Arizona", "Arkansas", "California", "Colorado"
 # <h3>Net Energy Generation by Select States in Thousand MWh; Quarterly 2001-2022</h3>
 
 # In[201]:
-
 
 net_gen = pd.read_csv("raw_data/net_energy_gen.csv")
 

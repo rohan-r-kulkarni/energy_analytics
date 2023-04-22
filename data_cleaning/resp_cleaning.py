@@ -1,3 +1,5 @@
+#! This file uses relative filepaths. Relative filepath may need to change based on user's file structure.
+
 import pandas as pd
 import numpy as np
 from sklearn.preprocessing import MinMaxScaler
