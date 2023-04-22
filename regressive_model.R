@@ -1,4 +1,7 @@
 library(ggplot2)
+library(ggfortify)
+library(xts)
+library(lubridate)
 
 # import generation datasets (X)
 indus <- c("biomass", "coal", "hydroelectric", "naturalgas", "nuclear", "solar", "wind", "wood")
@@ -30,14 +33,16 @@ head(rev)
 # Choose one state (we will make this a loop later)
 state <- "Texas"
 time <- seq(as.Date("2001-01-01"), as.Date("2022-12-01"), by="month")
+shifted.time <- na.omit(shift(time, 1))
+
 
 #building climate index
 equal.weighting <- replicate(length(climatecols), 1/length(climatecols)) # user-defined
 
 minmax.scaler <- function(x){(x-min(x))/(max(x)-min(x))}
 
-plot.vs.time <- function(vals, ytitle="Value", maintitle="Time Series"){
-  df <- data.frame(Time = time, yvar = vals)
+plot.vs.time <- function(vals, this.time, ytitle="Value", maintitle="Time Series"){
+  df <- data.frame(Time = this.time, yvar = vals)
   p <- ggplot(df, aes(x=Time, y=yvar)) + ylab(ytitle) + ggtitle(maintitle) + geom_line()
   return (p)
 }
@@ -52,23 +57,17 @@ get.state.climateindex <- function(state, weighting){
   return (minmax.scaler(index)*100) #scale the whole index
 }
 
-state.climindex <- get.state.climateindex(state, equal.weighting)
-
-# create response variable
-careparam <- 0.3 #the "care" parameter
 get.response <- function(state, climindex, param){
   sales <- minmax.scaler(rev[,state]/pop[,state])*100 
   #scaled revenue per capita from energy sales
   resp <- param*sales + (1-param)*climindex #scale the convex combo
   return (resp)
 }
-state.resp <- get.response(state, state.climindex, careparam)
-plot.vs.time(state.resp)
 
-# X vs. Y
 shift <- function(x, n){
   c(x[-(seq(n))], rep(NA, n))
 }
+
 get.stateXY <- function(state, resp){
   X <- data.frame((matrix(nrow=length(time))))
   for (i in 1:length(indus)){
@@ -85,23 +84,44 @@ get.stateXY <- function(state, resp){
   
   return (na.omit(out)) # 263 observations
 }
-stateXY <- get.stateXY(state, state.resp)
-#plot.vs.time(stateXY$biomass)
 
-#train test split
-split <- trunc(0.75*nrow(stateXY))
-state.train <- stateXY[1:split,]
-state.test <- stateXY[(split+1):nrow(stateXY),]
+linear.regression <- function(state){
+  state.climindex <- get.state.climateindex(state, equal.weighting)
+  
+  #how to choose careparam? Cross validate!
+  careparam <- 0.7 #the "care" parameter
+  state.resp <- get.response(state, state.climindex, careparam)
+  
+  # X vs. Y
+  stateXY <- get.stateXY(state, state.resp)
+  
+  #train test split
+  split <- trunc(0.75*nrow(stateXY))
+  state.train <- stateXY[1:split,]
+  state.test <- stateXY[(split+1):nrow(stateXY),]
 
-## MULTIVARIATE LINEAR REGRESSION ##
+  ## MULTIVARIATE LINEAR REGRESSION ##
+  state.lm <- lm(RESP~., data=state.train)
+  summary(state.lm)
+  pred <- predict.lm(state.lm, newdata=state.test)
+  act <- state.test$RESP
+  state.mae <- mean(abs(act-pred))
+  state.mse <- mean((act-pred)^2)
 
-state.lm <- lm(RESP~., data=state.train)
-summary(state.lm)
-pred <- predict.lm(state.lm, newdata=state.test)
-act <- state.test$RESP
-state.mae <- mean(abs(act-pred))
-state.mae
-plot(seq(length(pred)), pred, type='b', col="blue")
-lines(seq(length(act)), act, type='b', col="red")
+  plot(seq(length(pred)), pred, type='b', col="blue")
+  lines(seq(length(act)), act, type='b', col="red")
+  
+  return (c(state.mae, state.mse))
+}
 
-nrow(stateXY)
+res <- c(0,0)
+res <- linear.regression("Texas")
+res[1]
+res[2]
+
+
+
+
+
+
+

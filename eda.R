@@ -1,50 +1,118 @@
+# Example state: Texas
+# STL decomposition shows that the generation/revenue data is non stationary
+# Exponential smoothing, moving averages would work better than ARIMA (autoregressive)
+
 library(ggplot2)
+library(ggfortify)
+library(xts)
+library(lubridate)
 
-gasp <- read.csv("clean_data/clean_gasprice.csv")
-relevstates <- names(gasp)[2:length(names(gasp))]
-gasp$X <- as.Date(gasp$X)
+# import generation datasets (X)
+indus <- c("biomass", "coal", "hydroelectric", "naturalgas", "nuclear", "solar", "wind", "wood")
 
-gasp$Date <- as.Date(gasp$Date)
-
-p <- ggplot(gasp) + geom_line(aes(x=Date,y=Colorado), group=1, color="red")
-p
-ggplot(gasp) + geom_line(data=gasp$Colorado, aes(x=Date, y="Value"))
-
-colors = c("red", "blue", "green", "orange", "purple", "black", "magenta")
-priceplot <- ggplot(gasp, aes(x=Date)) + xlab("Year") + ylab("Price") + ggtitle("Gas Prices") 
-for (i in seq(1,length(relevstates))){
-  state <- relevstates[i]
-  print(state)
-  this_color <- colors[i]
-  priceplot <- priceplot + geom_line( aes(y = gasp[[state]]), 
-                                     color=this_color)
+genlist <- list()
+for (i in 1:length(indus)){
+  filepath <- paste("clean_data/clean_", indus[i], "_gen.csv", sep="")
+  this_df <- data.frame(read.csv(filepath))
+  genlist[[i]] <- this_df
 }
-priceplot
-?scale_y_date
-priceplot <- priceplot + scale_x_date(date_breaks = "1 year") + scale_y_date(breaks = 1)
-priceplot <- priceplot + theme(axis.text.x=element_text(angle=50, hjust=1)) 
-priceplot
-list(gasp["Colorado"])
-x <- seq(length(gasp$X))
 
-Ys <- cbind(gasp$Florida, gasp$Colorado, gasp$Ohio)
-plot(x, gasp$Colorado, type="l")
-lines(x, gasp$Florida, type="l")
+# import population dataset (normalizer)
+pop <- read.csv("clean_data/clean_population.csv")
+head(pop)
 
-?ggplot
-axis(1, at = x, labels = gasp$X, las=3)
+# import response variables
+climatecols <- c("DSCI", "pH", "temp", "turbidity")
+climatedata <- list()
+for (i in 1:length(climatecols)){
+  filepath <- paste("clean_data/resp/clean_", climatecols[i], ".csv", sep="")
+  this_df <- data.frame(read.csv(filepath))
+  climatedata[[i]] <- this_df
+}
+rev <- read.csv("clean_data/resp/clean_revenue.csv")
+head(rev)
 
-?plot
+########
 
-p <- ggplot(gasp, aes(x=X,y=Colorado))
-p
+# Choose one state (we will make this a loop later)
+state <- "Texas"
+time <- seq(as.Date("2001-01-01"), as.Date("2022-12-01"), by="month")
+shifted.time <- na.omit(shift(time, 1))
+
+#building climate index
+equal.weighting <- replicate(length(climatecols), 1/length(climatecols)) # user-defined
+
+minmax.scaler <- function(x){(x-min(x))/(max(x)-min(x))}
 
 
+get.state.climateindex <- function(state, weighting){
+  index <- replicate(nrow(data.frame(climatedata[1])), 0) # 0-initialize
+  for (i in 1:length(climatecols)){
+    values <- c(data.frame(climatedata[i])[,state])    
+    values <- minmax.scaler(values)*100 #scale each climate variable
+    index <- index + values*weighting[i]
+  }
+  return (minmax.scaler(index)*100) #scale the whole index
+}
 
-plot <- +
-   +
-  geom_line(aes(y = Florida, group = 1), color="blue") +
-  geom_line(aes(y = New.York, group = 1), color="green")
+state.climindex <- get.state.climateindex(state, equal.weighting)
+
+# create response variable
+careparam <- 0.7 #the "care" parameter
+get.response <- function(state, climindex, param){
+  sales <- minmax.scaler(rev[,state]/pop[,state])*100 
+  #scaled revenue per capita from energy sales
+  resp <- param*sales + (1-param)*climindex #scale the convex combo
+  return (resp)
+}
+state.resp <- get.response(state, state.climindex, careparam)
+
+# X vs. Y
+shift <- function(x, n){
+  c(x[-(seq(n))], rep(NA, n))
+}
+get.stateXY <- function(state, resp){
+  X <- data.frame((matrix(nrow=length(time))))
+  for (i in 1:length(indus)){
+    col.name <- indus[i]
+    cols.available <- c(names(genlist[[i]]))
+    if (state %in% cols.available){
+      # per capita generation by sector, then scaled up
+      X[[col.name]] <- (data.frame(genlist[[i]])[,state]/pop[,state])*(10e4)
+    }
+  }
+  out <- X[,2:length(names(X))]
+  out[["RESP"]] <- resp
+  out$RESP <- shift(out$RESP, 1) #shift to predict next month on this month
+  
+  return (na.omit(out)) # 263 observations
+}
+stateXY <- get.stateXY(state, state.resp)
+
+## STL ##
+
+plot.vs.time <- function(vals, this.time, ytitle="Value", maintitle=""){
+  df <- data.frame(Time = this.time, yvar = vals)
+  p <- ggplot(df, aes(x=Time, y=yvar)) + ylab(ytitle) + ggtitle(paste(maintitle, "Time Series")) + geom_line() + scale_x_date(date_labels = "%b %Y", date_breaks = "1 year") + theme(axis.text.x=element_text(angle=50, hjust=1)) 
+  return (p)
+}
 
 
-?ggplot
+plot.stl <- function(vals, this.time, freq=12, maintitle="Time Series"){
+  start <- c(year(xts::first(this.time)), month(xts::first(this.time)))
+  end <- c(year(xts::last(this.time)), month(xts::last(this.time)))
+  tsobject <- ts(data = as.vector(coredata(vals)),
+                 start = start,
+                 end = end, frequency = freq)
+  fit <- stl(tsobject, s.window = "periodic")
+  p <- autoplot(fit, ts.colour = 'blue') + ggtitle(paste("STL Decomposition of", maintitle))
+  return (p)
+}
+
+plot.vs.time(state.resp, time, "Response", "Response")
+plot.stl(state.resp, time, freq=12, maintitle="Reponse")
+
+# do for every generation in indus
+indus <- c("biomass", "coal", "hydroelectric", "naturalgas", "nuclear", "solar", "wind", "wood")
+
+
