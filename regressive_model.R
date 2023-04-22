@@ -15,7 +15,7 @@ for (i in 1:length(indus)){
 
 # import population dataset (normalizer)
 pop <- read.csv("clean_data/clean_population.csv")
-head(pop)
+relevstates <- names(pop)[2:length(names(pop))]
 
 # import response variables
 climatecols <- c("DSCI", "pH", "temp", "turbidity")
@@ -26,15 +26,14 @@ for (i in 1:length(climatecols)){
   climatedata[[i]] <- this_df
 }
 rev <- read.csv("clean_data/resp/clean_revenue.csv")
-head(rev)
 
 ########
+shift <- function(x, n){
+  c(x[-(seq(n))], rep(NA, n))
+}
 
-# Choose one state (we will make this a loop later)
-state <- "Texas"
 time <- seq(as.Date("2001-01-01"), as.Date("2022-12-01"), by="month")
 shifted.time <- na.omit(shift(time, 1))
-
 
 #building climate index
 equal.weighting <- replicate(length(climatecols), 1/length(climatecols)) # user-defined
@@ -64,10 +63,6 @@ get.response <- function(state, climindex, param){
   return (resp)
 }
 
-shift <- function(x, n){
-  c(x[-(seq(n))], rep(NA, n))
-}
-
 get.stateXY <- function(state, resp){
   X <- data.frame((matrix(nrow=length(time))))
   for (i in 1:length(indus)){
@@ -88,38 +83,81 @@ get.stateXY <- function(state, resp){
 linear.regression <- function(state){
   state.climindex <- get.state.climateindex(state, equal.weighting)
   
-  #how to choose careparam? Cross validate!
-  careparam <- 0.7 #the "care" parameter
-  state.resp <- get.response(state, state.climindex, careparam)
+  #Cross Validation to choose care parameter
+  careparams <- seq(0,1,0.1) #the "care" parameter, 0 - 1 (climate impact - energy sales)
+  cv.param.mse <- c()
+  for (i in 1:length(careparams)){
+    this.careparam = careparams[i]
+    cv.state.resp <- get.response(state, state.climindex, this.careparam)
+    
+    # X vs. Y
+    cv.stateXY <- get.stateXY(state, cv.state.resp)
+    
+    #train test split
+    split <- trunc(0.75*nrow(cv.stateXY))
+    cv.state.train <- cv.stateXY[1:split,]
+    init.index <- 0.5*nrow(cv.stateXY)
+    validroll <- 3
+    traintill <- split-validroll
+    current.index <- init.index
+    cv.mse.list <- c()
+    while (current.index < traintill){
+      cv.train <- cv.state.train[1:current.index,] 
+      cv.valid <- cv.state.train[current.index:current.index+validroll,]
+      cv.state.lm <- lm(RESP~., data=cv.train)
+      cv.pred <- predict.lm(cv.state.lm, newdata=cv.valid)
+      cv.act <- cv.valid$RESP
+      cv.state.mse <- mean((cv.act-cv.pred)^2)
+      cv.mse.list <- c(cv.mse.list, cv.state.mse)
+      current.index <- current.index + validroll
+    }
+    cv.param.mse <- c(cv.param.mse, mean(cv.mse.list))
+  }
+
+  best.careparam = careparams[which.min(cv.param.mse)]
+  best.state.resp <- get.response(state, state.climindex, best.careparam)
   
   # X vs. Y
-  stateXY <- get.stateXY(state, state.resp)
+  stateXY <- get.stateXY(state, best.state.resp)
   
   #train test split
   split <- trunc(0.75*nrow(stateXY))
   state.train <- stateXY[1:split,]
   state.test <- stateXY[(split+1):nrow(stateXY),]
-
+  
   ## MULTIVARIATE LINEAR REGRESSION ##
+  
   state.lm <- lm(RESP~., data=state.train)
-  summary(state.lm)
+  
+  coeffs <- summary(state.lm)$coefficients
+  adj.r.sq <- summary(state.lm)$adj.r.squared
+  feature.pvals <- sort(coeffs[2:nrow(coeffs), 4])
+  top3.pvals <- feature.pvals[1:3]
+
   pred <- predict.lm(state.lm, newdata=state.test)
   act <- state.test$RESP
   state.mae <- mean(abs(act-pred))
   state.mse <- mean((act-pred)^2)
-
+  
+  ## TODO: Fix plotting
   plot(seq(length(pred)), pred, type='b', col="blue")
   lines(seq(length(act)), act, type='b', col="red")
   
-  return (c(state.mae, state.mse))
+  top3.pvals.names <- paste(list(names(top3.pvals)))
+  regression.res <- c(state.mae, state.mse, best.careparam, adj.r.sq, top3.pvals.names)
+
+  return (regression.res)
 }
 
-res <- c(0,0)
-res <- linear.regression("Texas")
-res[1]
-res[2]
+index <- c("MAE", "MSE", "best.careparam", "adj.r.sq", "t3.pvals")
+regression.analysis <- data.frame(index)
 
-
+for (i in 1:length(relevstates)){
+  this.relevstate <- relevstates[i]
+  res <- linear.regression(this.relevstate)
+  regression.analysis[[this.relevstate]] = res
+}
+regression.analysis
 
 
 
