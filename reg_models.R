@@ -50,15 +50,24 @@ plot.vs.time <- function(vals, this.time, ytitle="Value", maintitle="Time Series
   return (p)
 }
 
-plot2.vs.time <- function(vals1, vals2, this.time, c1="red", c2="blue", label1="Predicted", label2="Actual", ytitle="Value", maintitle="Time Series"){
+plot2.vs.time <- function(vals1, vals2, this.time, prescribed.resp=NaN, prescribed.value = NaN, c1="red", c2="blue", label1="Predicted", label2="Actual", ytitle="Value", maintitle="Time Series"){
   df <- data.frame(Time = this.time, vals1 = vals1, vals2=vals2)
   p <- ggplot(df, aes(x=this.time)) + ylab(ytitle) + ggtitle(maintitle) + 
     geom_line(aes(y=vals1, color=label1)) + 
-    geom_line(aes(y=vals2, color=label2)) + 
-    scale_x_date(date_labels = "%b %Y", date_breaks = "1 year") + 
+    geom_line(aes(y=vals2, color=label2))
+  if (!(is.na(prescribed.value))){
+    pres.label = paste("Prescription:", prescribed.value)  
+    p <- p + geom_line(aes(y=prescribed.resp, color=pres.label)) + 
+         scale_color_manual(values = c(c1, c2, "black"), labels=c(label1, label2, pres.label))
+  }
+  else{
+    p <- p + scale_color_manual(values = c(c1, c2), labels=c(label1, label2))
+  }
+  
+  p <- p + scale_x_date(date_labels = "%b %Y", date_breaks = "1 year") + 
     theme(axis.text.x=element_text(angle=50, hjust=1)) + 
-    labs(x = "Time", color = "Legend") +
-    scale_color_manual(values = c(c1, c2), labels=c(label1, label2))
+    labs(x = "Time", color = "Legend")
+  
   return (p)
 }
 
@@ -98,7 +107,7 @@ get.stateXY <- function(state, resp){
 }
 
 ## MULTIPLE LINEAR REGRESSION ##
-linear.regression <- function(state){
+linear.regression <- function(state, prescription){
   state.climindex <- get.state.climateindex(state, equal.weighting)
   
   #Cross Validation to choose care parameter
@@ -134,6 +143,10 @@ linear.regression <- function(state){
 
   best.careparam = careparams[which.min(cv.param.mse)]
   best.state.resp <- get.response(state, state.climindex, best.careparam)
+  if (!is.na(prescription)){ #a prescription is being done
+    prescribed.resp <- get.response(state, state.climindex, prescription)
+    prescribed.resp <- get.stateXY(state, prescribed.resp)[["RESP"]]
+  }
   
   # X vs. Y
   stateXY <- get.stateXY(state, best.state.resp)
@@ -142,6 +155,9 @@ linear.regression <- function(state){
   split <- trunc(0.75*nrow(stateXY))
   state.train <- stateXY[1:split,]
   state.test <- stateXY[(split+1):nrow(stateXY),]
+  if (!is.na(prescription)){ #a prescription is being done
+    prescribed.resp <- prescribed.resp[(split+1):length(prescribed.resp)]
+  }
   
   ## MULTIVARIATE LINEAR REGRESSION ##
   
@@ -159,10 +175,18 @@ linear.regression <- function(state){
   
   test.time <- time[(trunc(0.75*length(time))+1):length(time)]
   
-  filepath <- paste0(getwd(), "/plots/results/linear/")
-  save.filetitle <- paste0(state,"_predvact")
-  pred.v.act <- plot2.vs.time(pred, act, test.time, maintitle=paste0("Linear Regression Model Prediction vs. Actual, ", state, " - Care Parameter=",best.careparam))
-  ggsave(paste0(filepath, save.filetitle, ".png"), pred.v.act,"png")
+  pred.v.act <- plot2.vs.time(pred, act, test.time, prescribed.resp, prescription, maintitle=paste0("Linear Regression Model Prediction vs. Actual, ", state, " - Care Parameter=",best.careparam))
+  print(pred.v.act)
+  if (!is.na(prescription)){
+    filepath <- paste0(getwd(), "/plots/results/linear/prescriptive/")
+    save.filetitle <- paste0(state,"_predvact")
+    ggsave(paste0(filepath, save.filetitle, ".png"), pred.v.act,"png")
+  }
+  else{
+    filepath <- paste0(getwd(), "/plots/results/linear/predictive_only/")
+    save.filetitle <- paste0(state,"_predvact")
+    ggsave(paste0(filepath, save.filetitle, ".png"), pred.v.act,"png")
+  }
   
   top3.pvals.names <- paste(list(names(top3.pvals)))
   regression.res <- c(state.mae, state.mse, best.careparam, adj.r.sq, top3.pvals.names)
@@ -176,7 +200,7 @@ regression.analysis <- data.frame(index)
 
 for (i in 1:length(relevstates)){
   this.relevstate <- relevstates[i]
-  res <- linear.regression(this.relevstate)
+  res <- linear.regression(this.relevstate, NaN)
   regression.analysis[[this.relevstate]] = res
 }
 
@@ -187,7 +211,7 @@ head(regression.analysis)
 moving.avg <- function(x,kay){
   return (runner(x, k=kay, f=mean))
 }
-window.regression <- function(state){
+window.regression <- function(state, prescription){
   state.climindex <- get.state.climateindex(state, equal.weighting)
   
   #Cross Validation to choose care parameter
@@ -224,6 +248,11 @@ window.regression <- function(state){
   
   best.careparam = careparams[which.min(cv.param.mse)]
   best.state.resp <- get.response(state, state.climindex, best.careparam)
+  if (!is.na(prescription)){ #a prescription is being done
+    prescribed.resp <- get.response(state, state.climindex, prescription)
+    prescribed.resp <- get.stateXY(state, prescribed.resp)
+    prescribed.resp <- data.frame(apply(prescribed.resp, MARGIN=2, FUN=moving.avg, kay=3))[["RESP"]]
+  }
   
   # X vs. Y
   stateXY <- get.stateXY(state, best.state.resp)
@@ -233,6 +262,9 @@ window.regression <- function(state){
   split <- trunc(0.75*nrow(stateXY.windows))
   state.trainwindows <- data.frame(stateXY.windows[1:split,])
   state.testwindows <- data.frame(stateXY.windows[(split+1):nrow(stateXY.windows),])
+  if (!is.na(prescription)){ #a prescription is being done
+    prescribed.resp <- prescribed.resp[(split+1):length(prescribed.resp)]
+  }
   
   ## ROLLING WINDOW REGRESSION ##
   
@@ -250,10 +282,19 @@ window.regression <- function(state){
   
   test.time <- time[(trunc(0.75*length(time))+1):length(time)]
   
-  filepath <- paste0(getwd(), "/plots/results/windows/")
-  save.filetitle <- paste0(state,"_predvact")
-  pred.v.act <- plot2.vs.time(predwindows, actwindows, test.time, maintitle=paste0("Rolling Window Model Prediction vs. Actual, ", state, " - Care Parameter=",best.careparam))
-  ggsave(paste0(filepath, save.filetitle, ".png"), pred.v.act,"png")
+  pred.v.act <- plot2.vs.time(predwindows, actwindows, test.time, prescribed.resp, prescription, maintitle=paste0("Rolling Window Model Prediction vs. Actual, ", state, " - Care Parameter=",best.careparam))
+  print(pred.v.act)
+  if (!is.na(prescription)){
+    filepath <- paste0(getwd(), "/plots/results/windows/prescriptive/")
+    save.filetitle <- paste0(state,"_predvact")
+    ggsave(paste0(filepath, save.filetitle, ".png"), pred.v.act,"png")
+  }
+  else{
+    filepath <- paste0(getwd(), "/plots/results/windows/predictive_only/")
+    save.filetitle <- paste0(state,"_predvact")
+    ggsave(paste0(filepath, save.filetitle, ".png"), pred.v.act,"png")
+  }
+
   
   top3.pvals.names <- paste(list(names(top3.pvals)))
   regression.res <- c(state.maewindows, state.msewindows, best.careparam, adj.r.sq, top3.pvals.names)
@@ -265,7 +306,7 @@ window.analysis <- data.frame(index)
 
 for (i in 1:length(relevstates)){
   this.relevstate <- relevstates[i]
-  res <- window.regression(this.relevstate)
+  res <- window.regression(this.relevstate, NaN)
   window.analysis[[this.relevstate]] = res
 }
 head(window.analysis)
@@ -303,15 +344,23 @@ barplot.analysis <- function(results1){
               geom_bar(stat="identity", position = "dodge", width=0.5) +
               labs(title=paste("Linear Regression vs. Rolling Windows Models,",this.title)) + scale_y_continuous(breaks= pretty_breaks()) + 
               theme(axis.text.x=element_text(angle=50, hjust=1)) + xlab("State") + ylab("Value")
-      #print(this.barplot)
+      print(this.barplot)
       ggsave(paste0(filepath, save.filetitle, ".png"), this.barplot,"png")
   }
 }
 barplot.analysis(regression.analysis)
 
+# run prescriptive, care param 0.1
+for (i in 1:length(relevstates)){
+  this.relevstate <- relevstates[i]
+  linear.regression(this.relevstate, 0.1)
+  window.regression(this.relevstate, 0.1)
+}
+
 csv.write.path <- paste0(getwd(), "/results/")
 write.csv(regression.analysis, paste0(csv.write.path, "res_linear_model.csv"))
 write.csv(window.analysis, paste0(csv.write.path, "res_windows_model.csv"))
+
 
 
 
