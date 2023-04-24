@@ -231,6 +231,8 @@ df10.columns = ['Date', "california", "texas","n_dakota","wyoming", "pennsylvani
 
 df10["date2"]=pd.to_datetime(df10['Date'],format='%m/%d/%Y')
 
+
+
 california=df10.california
 texas=df10.texas
 n_dakota=df10.n_dakota
@@ -285,7 +287,7 @@ d10 = pd.merge(d10,florida_month,how="outer",on="date2")
 d10.columns = [ "california", "texas","n_dakota","wyoming", "pennsylvania", "w_virginia", "oklahoma", "new_york", "ohio", "florida"]
 
 d10.index = d10.index.to_period('M').to_timestamp('M') - pd.offsets.MonthBegin(1)
-d10.index.name = "Date"
+d10.index.name = None
 
-d10.to_csv('/Users/spenceraustin/Downloads/energy_analytics-main/env_health_index/Air/final_AQI_data.csv',encoding='utf-8', index=True)
+d10.to_csv('/Users/spenceraustin/Downloads/energy_analytics-main/clean_data/clean_AQI.csv',encoding='utf-8', index=True)
 
