@@ -21,7 +21,7 @@ pop <- read.csv("clean_data/clean_population.csv")
 relevstates <- names(pop)[2:length(names(pop))]
 
 # import response variables
-climatecols <- c("DSCI", "pH", "temp", "turbidity")
+climatecols <- c("DSCI", "pH", "temp", "turbidity", "AQI")
 climatedata <- list()
 for (i in 1:length(climatecols)){
   filepath <- paste("clean_data/resp/clean_", climatecols[i], ".csv", sep="")

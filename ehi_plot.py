@@ -16,7 +16,7 @@ consumers = {"Texas", "California", "New York", "Florida", "Ohio", "Pennsylvania
 relevstates = list(producers.union(consumers))
 
 # %%
-genfiles = pd.Series(os.listdir("/Users/spenceraustin/Downloads/energy_analytics-main/clean_data/resp"))
+genfiles = pd.Series(os.listdir("clean_data/resp"))
 genfiles = genfiles[genfiles.str.contains("clean_")].values
 
 # %%
@@ -27,7 +27,7 @@ for i, genfile in enumerate(genfiles):
     if name=="revenue":
         continue 
 
-    gen_data = pd.read_csv("/Users/spenceraustin/Downloads/energy_analytics-main/clean_data/resp/" + genfile, index_col=0)
+    gen_data = pd.read_csv("clean_data/resp/" + genfile, index_col=0)
     fig, ax = plt.subplots()
 
     plotstates = gen_data.columns
@@ -47,5 +47,5 @@ for i, genfile in enumerate(genfiles):
     plt.xticks(np.arange(0, len(gen_data.index), 6), gen_data.index[::6])
     plt.xlabel("Time")
     plt.ylabel("Index Value")
-    plt.savefig("/Users/spenceraustin/Downloads/energy_analytics-main/plots/Environmental_Index_Plots/" + name.lower() + "_plot.png")
+    plt.savefig("plots/ehi_plots/" + name.lower() + "_plot.png")
     #plt.show()
