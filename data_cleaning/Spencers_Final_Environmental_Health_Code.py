@@ -50,7 +50,7 @@ DSCI_normalized.index = pd.to_datetime(DSCI.index)
 
 DSCI_export = DSCI_normalized.resample('MS').mean().loc[start_date:end_date,:]
 
-DSCI_export.to_csv("/Users/spenceraustin/Downloads/energy_analytics-main/clean_data/clean_DSCI.csv")
+DSCI_export.to_csv("/Users/spenceraustin/Downloads/energy_analytics-main/clean_data/resp/clean_DSCI.csv")
 
 
 #! Water Quality - done in more detail in /Water/ folder
@@ -289,5 +289,5 @@ d10.columns = [ "california", "texas","n_dakota","wyoming", "pennsylvania", "w_v
 d10.index = d10.index.to_period('M').to_timestamp('M') - pd.offsets.MonthBegin(1)
 d10.index.name = None
 
-d10.to_csv('/Users/spenceraustin/Downloads/energy_analytics-main/clean_data/clean_AQI.csv',encoding='utf-8', index=True)
+d10.to_csv('/Users/spenceraustin/Downloads/energy_analytics-main/clean_data/resp/clean_AQI.csv',encoding='utf-8', index=True)
 
